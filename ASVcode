@@ -1,0 +1,144 @@
+const int pmosDataPin = 22; // Data pin for PMOS
+const int pmosResetPin = 15; // Reset pin for PMOS
+const int nmosClockPin = 32; // Clock pin for NMOS
+const int nmosDataPin = 33; // Data pin for NMOS
+const int nmosResetPin = 25; // Reset pin for NMOS
+const unsigned long alarmDelay = 850; // Delay time for animations
+// Declarations for filter pins
+const uint8_t filterPin1 = 36;
+const uint8_t filterPin2 = 39;
+const uint8_t filterPin3 = 34;
+const uint8_t filterPin4 = 35;
+const uint8_t matrixSize = 8;
+uint8_t matrix[matrixSize][matrixSize];
+const uint8_t numFilters = 4;
+const uint16_t bufferLength = 50;
+uint16_t filterBuffer[numFilters][bufferLength] = {0};
+uint16_t filterMean[numFilters];
+const uint8_t filterPins[numFilters] = {filterPin1, filterPin2,
+filterPin3, filterPin4};
+const float filterScalers[numFilters] = {175, 175, 175, 175}; // Define
+appropriate values for X
+volatile bool animationRunning = false; // Missing semicolon added
+// Hardware timer initializations
+hw_timer_t *animationTimer = NULL;
+oid resetMatrix() {
+shiftOneBitPMOS(1);
+shiftOneBitPMOS(1);
+shiftOneBitPMOS(1);
+// Reset PMOS
+digitalWrite(pmosResetPin, HIGH);
+digitalWrite(pmosResetPin, LOW);
+// Reset NMOS
+digitalWrite(nmosResetPin, HIGH);
+digitalWrite(nmosResetPin, LOW);
+}
+void shiftOneBitPMOS(uint8_t data) {
+digitalWrite(pmosDataPin, data);
+digitalWrite(pmosClockPin, HIGH);
+digitalWrite(pmosClockPin, LOW);
+digitalWrite(pmosDataPin, LOW);
+}
+void shiftOneBitNMOS(uint8_t data) {
+digitalWrite(nmosDataPin, data);
+digitalWrite(nmosClockPin, HIGH);
+digitalWrite(nmosClockPin, LOW);
+digitalWrite(nmosDataPin, LOW);
+}
+void IRAM_ATTR animationHandler() {
+if (!animationRunning) {
+animationRunning = true;
+resetMatrix();
+static uint8_t currentRow = 0;
+shiftOneBitPMOS(0);
+if (currentRow == 1) {
+shiftOneBitPMOS(1);
+}
+if (currentRow == 2) {
+shiftOneBitPMOS(1);
+shiftOneBitPMOS(1);
+}
+for (int col = 0; col < 8; col++) {
+shiftOneBitNMOS(matrix[currentRow][7 - col]);
+}
+currentRow = (currentRow + 1) % 8;
+animationRunning = false;
+}
+}
+void updateMatrix(uint8_t *cols, uint8_t numRows, uint8_t numCols) {
+resetMatrix();
+int8_t colsInverse[3] = {0, 0, 0};
+for (uint8_t i = 0; i < numCols; i++) {
+colsInverse[i] = numRows - cols[i];
+}
+for (int8_t i = 0; i < numRows; i++) {
+for (int8_t j = 0; j < numCols; j++) {
+if (colsInverse[j] > 0) {
+matrix[i][j] = 0; // Set to 0 if colsInverse[j] is greater than 0
+} else {
+matrix[i][j] = 1; // Set to 1 otherwise
+}
+colsInverse[j]--; // Decrement colsInverse[j]
+}
+}
+}
+uint16_t calculateBufferMean(uint16_t *buffer, uint16_t length) {
+uint32_t average = 0;
+for (size_t i = 0; i < length; i++) {
+average += buffer[i];
+}
+return average / length;
+}
+void setup() {
+Serial.begin(115200);
+pinMode(filterPin1, INPUT);
+pinMode(filterPin2, INPUT);
+pinMode(filterPin3, INPUT);
+pinMode(filterPin4, INPUT);
+pinMode(pmosClockPin, OUTPUT);
+pinMode(pmosDataPin, OUTPUT);
+pinMode(pmosResetPin, OUTPUT);
+pinMode(nmosClockPin, OUTPUT);
+pinMode(nmosDataPin, OUTPUT);
+pinMode(nmosResetPin, OUTPUT);
+resetMatrix();
+// Creating a timer called animationTimer
+animationTimer = timerBegin(1, 80, true);
+timerAttachInterrupt(animationTimer, &animationHandler, true);
+timerAlarmWrite(animationTimer, alarmDelay, true);
+timerAlarmEnable;
+}
+void loop() {
+static uint8_t cols[matrixSize];
+static uint16_t counter = 0; // Counter for filterBuffer
+// Use a for loop to read every filter pin and store it in
+filterBuffer.
+// Make sure to update 'counter' appropriately.
+for (uint8_t ii = 0; ii = numFilters ; ii++)
+{
+filterBuffer[ii][counter] = analogRead(filterPins[ii]);
+}
+if (counter < bufferLength-1)
+{
+counter++;
+}
+else
+{
+counter = 0;
+}
+for (uint8_t i = 0; i < numFilters; i++) {
+filterMean[i] = calculateBufferMean(filterBuffer[i],
+bufferLength);
+}
+for (uint8_t ii = 0; ii<numFilters; ii++){
+cols[2*ii] = round((float)matrixSize * ((float)filterMean[ii] /
+filterScalers[ii]));
+cols[2*ii+1] = cols[2*ii];
+}
+updateMatrix(cols, matrixSize, matrixSize);
+Serial.printf("%4d", filterMean[0]);
+for(uint8_t ii = 1; ii < numFilters; ii++){
+Serial.printf(",%4d", filterMean[ii]);
+}
+Serial.printf("\r\n");
+}
